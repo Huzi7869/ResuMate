@@ -1,11 +1,11 @@
 import {type FormEvent, useState} from 'react'
-import Navbar from "~/Components/Navbar";
-import FileUploader from "~/components/FileUploader";
+import Navbar from "~/Components/Navbar"; // or ~/components/Navbar - check your folder structure
+import FileUploader from "~/Components/FileUploader"; // or ~/components/FileUploader
 import {usePuterStore} from "~/lib/puter";
 import {useNavigate} from "react-router";
+import {convertPdfToImage} from "~/lib/pdf2img";
 import {generateUUID} from "~/lib/utils";
 import {prepareInstructions} from "../../constants";
-import {convertPdfToImage} from "~/lib/pdf2img";
 
 const Upload = () => {
     const { auth, isLoading, fs, ai, kv } = usePuterStore();
@@ -31,21 +31,19 @@ const Upload = () => {
                 throw new Error('Failed to upload file');
             }
 
-            setStatusText('Converting PDF to image...');
-            const imageResult = await convertPdfToImage(file);
-
-            // Check for conversion errors
-            if (imageResult.error || !imageResult.file) {
-                throw new Error(imageResult.error || 'Failed to convert PDF to image');
+            setStatusText('Converting to image...');
+            const imageFile = await convertPdfToImage(file);
+            if(!imageFile.file) {
+                throw new Error('Failed to convert PDF to image');
             }
 
-            setStatusText('Uploading the converted image...');
-            const uploadedImage = await fs.upload([imageResult.file]);
+            setStatusText('Uploading the image...');
+            const uploadedImage = await fs.upload([imageFile.file]);
             if(!uploadedImage) {
-                throw new Error('Failed to upload converted image');
+                throw new Error('Failed to upload image');
             }
 
-            setStatusText('Preparing data for analysis...');
+            setStatusText('Preparing data...');
             const uuid = generateUUID();
             const data = {
                 id: uuid,
@@ -58,14 +56,14 @@ const Upload = () => {
             }
             await kv.set(`resume:${uuid}`, JSON.stringify(data));
 
-            setStatusText('Analyzing your resume with AI...');
+            setStatusText('Analyzing...');
             const feedback = await ai.feedback(
                 uploadedFile.path,
                 prepareInstructions({ jobTitle, jobDescription })
             );
 
             if (!feedback) {
-                throw new Error('Failed to analyze resume - AI service unavailable');
+                throw new Error('Failed to analyze resume');
             }
 
             const feedbackText = typeof feedback.message.content === 'string'
@@ -75,15 +73,21 @@ const Upload = () => {
             try {
                 data.feedback = JSON.parse(feedbackText);
             } catch (parseError) {
-                console.error('Failed to parse feedback:', parseError);
-                data.feedback = { error: 'Failed to parse AI feedback', rawFeedback: feedbackText };
+                console.error('Failed to parse feedback JSON:', parseError);
+                console.log('Raw feedback text:', feedbackText);
+                // Still save the data but with raw feedback
+                data.feedback = { error: 'Parse error', raw: feedbackText };
             }
 
             await kv.set(`resume:${uuid}`, JSON.stringify(data));
-            setStatusText('Analysis complete! Redirecting...');
 
+            setStatusText('Analysis complete, redirecting...');
             console.log('Analysis completed successfully:', data);
-            navigate(`/resume/${uuid}`);
+
+            // Add a small delay to ensure the user sees the message
+            setTimeout(() => {
+                navigate(`/resume/${uuid}`);
+            }, 1000);
 
         } catch (error) {
             console.error('Analysis failed:', error);
@@ -105,7 +109,7 @@ const Upload = () => {
         const jobTitle = formData.get('job-title') as string;
         const jobDescription = formData.get('job-description') as string;
 
-        // Validation
+        // Basic validation
         if (!companyName.trim()) {
             setErrorText('Company name is required');
             return;
@@ -156,7 +160,7 @@ const Upload = () => {
                                 <input
                                     type="text"
                                     name="company-name"
-                                    placeholder="e.g., Google, Microsoft, Startup Inc."
+                                    placeholder="e.g., Google, Microsoft"
                                     id="company-name"
                                     required
                                 />
@@ -166,7 +170,7 @@ const Upload = () => {
                                 <input
                                     type="text"
                                     name="job-title"
-                                    placeholder="e.g., Software Engineer, Product Manager"
+                                    placeholder="e.g., Software Engineer"
                                     id="job-title"
                                     required
                                 />
@@ -187,7 +191,7 @@ const Upload = () => {
                                 <FileUploader onFileSelect={handleFileSelect} />
                                 {file && (
                                     <p className="text-sm text-gray-600 mt-2">
-                                        Selected: {file.name} ({(file.size / 1024 / 1024).toFixed(2)} MB)
+                                        Selected: {file.name}
                                     </p>
                                 )}
                             </div>
